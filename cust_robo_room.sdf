@@ -1,0 +1,81 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="project1_world">
+
+    <!-- Directional Light -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Ground Plane -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Environment Geometry with Properly Connected Inner Walls -->
+    <model name="project1_environment">
+      <static>true</static>
+
+      <!-- 1. Outer Bounding Wall - North / Top (15ft / 4.572m) -->
+      <link name="wall_outer_north">
+        <pose>0 3.048 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></visual>
+      </link>
+
+      <!-- 2. Outer Bounding Wall - South / Bottom (15ft / 4.572m) -->
+      <link name="wall_outer_south">
+        <pose>0 -3.048 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></visual>
+      </link>
+
+      <!-- 3. Outer Bounding Wall - West / Left (20ft / 6.096m) -->
+      <link name="wall_outer_west">
+        <pose>-2.286 0 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
+      </link>
+
+      <!-- 4. Outer Bounding Wall - East / Right (20ft / 6.096m) -->
+      <link name="wall_outer_east">
+        <pose>2.286 0 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
+      </link>
+
+      <link name="wall_inner_vertical_top">
+        <pose>0.762 2.286 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></visual>
+      </link>
+
+      <link name="wall_inner_south_bottom">
+        <pose>-0.762 -1.524 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>3.048 0.15 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>3.048 0.15 2.5</size></box></geometry></visual>
+      </link>
+
+      <link name="wall_inner_vertical_bottom">
+        <pose>0.762 -0.762 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></visual>
+      </link>
+
+    </model>
+
+  </world>
+</sdf>

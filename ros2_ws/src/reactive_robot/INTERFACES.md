@@ -76,7 +76,7 @@ about 0.15 m smaller than the nominal room and hallway dimensions.
 ## Running
 
 ```bash
-# in the workspace root, with this repo in src/
+cd IRP1/ros2_ws
 colcon build --packages-select reactive_robot && source install/setup.bash
 ros2 launch reactive_robot sim.launch.py            # x:= y:= yaw:= to move the start pose
 ros2 run reactive_robot reactive_controller --ros-args -p use_sim_time:=true

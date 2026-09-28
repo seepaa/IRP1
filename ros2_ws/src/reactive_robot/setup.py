@@ -5,6 +5,10 @@ from setuptools import find_packages, setup
 
 package_name = 'reactive_robot'
 
+# Thomas's world lives at the repo root (IRP1/cust_robo_room.sdf), three
+# levels above this package; it is installed from there, not copied here.
+WORLD_FILE = os.path.join('..', '..', '..', 'cust_robo_room.sdf')
+
 setup(
     name=package_name,
     version='0.0.1',
@@ -15,10 +19,8 @@ setup(
         ('share/' + package_name, ['package.xml', 'INTERFACES.md']),
         (os.path.join('share', package_name, 'launch'),
             glob('launch/*.launch.py')),
-        # Thomas's world, installed from its original location (not copied
-        # in the repo). The world has no external model assets.
-        (os.path.join('share', package_name, 'worlds'),
-            ['cust_robo_room.sdf']),
+        # The world has no external model assets.
+        (os.path.join('share', package_name, 'worlds'), [WORLD_FILE]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

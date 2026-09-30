@@ -146,7 +146,7 @@ class SubsumptionController(Node):
         is_symmetric = abs(self.front_left_dist - self.front_right_dist) < 0.08
 
         if self.is_escaping:
-            angle_diff = abs(self.current_yaw - self.escape_target_yaw)
+            angle_diff = abs(self.normalize_angle(self.current_yaw - self.escape_target_yaw))
             if angle_diff > math.radians(15):
                 cmd.angular.z = 0.5
                 self.cmd_pub.publish(cmd)
@@ -159,7 +159,8 @@ class SubsumptionController(Node):
             self.get_logger().info('P3: Symmetric obstacle within 1ft. Escaping...')
             self.is_escaping = True
             turn_rad = math.radians(180 + random.uniform(-30, 30))
-            self.escape_target_yaw = (self.current_yaw + turn_rad) % (2 * math.pi)
+            self.escape_target_yaw = self.normalize_angle(self.current_yaw + turn_rad) % (2 * math.pi)
+            cmd.linear.x = -0.1
             cmd.angular.z = 0.5
             self.cmd_pub.publish(cmd)
             return
@@ -188,6 +189,9 @@ class SubsumptionController(Node):
         cmd.linear.x = 0.2
         cmd.angular.z = 0.0
         self.cmd_pub.publish(cmd)
+
+    def normalize_angle(self, angle):
+        return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def main(args=None):

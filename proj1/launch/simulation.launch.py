@@ -6,8 +6,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    pkg_proj1 = get_package_share_directory('proj1')
-    world_path = os.path.join(pkg_proj1, 'worlds', 'cust_robo_room.sdf')
+    pkg_share = get_package_share_directory('proj1')
+    world_path = os.path.join(pkg_share, 'worlds', 'cust_robo_room.sdf')
 
     # 1. Launch Gazebo Sim (Package: ros_gz_sim)
     gazebo = IncludeLaunchDescription(
@@ -31,5 +31,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         gazebo,
-        ros_gz_bridge
+        ros_gz_bridge,
+	Node(
+	    package='proj1',
+	    executable='reactive_node',
+	    name='subsumption_controller',
+	    output='screen'
+	)
     ])

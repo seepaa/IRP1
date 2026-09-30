@@ -1,200 +1,335 @@
+"""
+Reactive (subsumption-style) controller for a simulated TurtleBot 4.
+
+Behaviors, highest priority first. Each behavior is its own method that
+returns a velocity command when it wants control this cycle, or ``None`` to
+let a lower-priority behavior act (the first non-``None`` command wins):
+
+1. halt        -- stop while any bumper is pressed.
+2. teleop      -- pass through keyboard commands from ``/teleop_cmd``.
+3. escape      -- (roughly) symmetric obstacles within 1 ft in front: turn to
+                  face away, 180 +/- 30 deg. Fixed action pattern: once
+                  started it finishes even if the obstacle disappears.
+4. avoid       -- asymmetric obstacles within 1 ft in front: turn away from
+                  the closer side. Reflex: only while the obstacle is there.
+5. random_turn -- after every 1 ft of forward travel, turn by an angle drawn
+                  uniformly from [-15, +15] deg.
+6. forward     -- drive straight ahead.
+"""
+
 import math
 import random
-import rclpy
-from rclpy.node import Node
-from rclpy.executors import ExternalShutdownException
+
 from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
+from irobot_create_msgs.msg import HazardDetection
+from irobot_create_msgs.msg import HazardDetectionVector
+from nav_msgs.msg import Odometry
+import rclpy
+from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry, OccupancyGrid
-from std_msgs.msg import Header
+from tf2_ros import Buffer
+from tf2_ros import TransformException
+from tf2_ros import TransformListener
+
+FOOT = 0.3048  # m; the brief is written in feet, ROS uses SI units.
+
+
+def normalize_angle(angle):
+    """Wrap an angle in radians to [-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def yaw_from_quaternion(q):
+    """Return the yaw (rotation about z) of a geometry_msgs Quaternion."""
+    siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+    cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+    return math.atan2(siny_cosp, cosy_cosp)
 
 
 class SubsumptionController(Node):
+    """Priority-arbitrated reactive controller (see module docstring)."""
+
     def __init__(self):
+        """Declare parameters, then create publishers, subscribers, timer."""
         super().__init__('subsumption_controller')
 
-        # Subscriptions
-        self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        # Jazzy TurtleBot 4 takes TwistStamped on /cmd_vel; set stamped:=false
+        # if `ros2 topic info /cmd_vel` shows geometry_msgs/msg/Twist.
+        self.stamped = self.declare_parameter('stamped', True).value
+        self.base_frame = self.declare_parameter(
+            'base_frame', 'base_link').value
+        self.forward_speed = self.declare_parameter(
+            'forward_speed', 0.2).value                          # m/s
+        self.turn_speed = self.declare_parameter(
+            'turn_speed', 0.8).value                             # rad/s
+        self.obstacle_distance = self.declare_parameter(
+            'obstacle_distance', 1.0 * FOOT).value               # m
+        self.front_half_angle = math.radians(self.declare_parameter(
+            'front_half_angle_deg', 30.0).value)
+        self.symmetry_tolerance = self.declare_parameter(
+            'symmetry_tolerance', 0.08).value                    # m
+        self.escape_angle = math.radians(self.declare_parameter(
+            'escape_angle_deg', 180.0).value)
+        self.escape_spread = math.radians(self.declare_parameter(
+            'escape_spread_deg', 30.0).value)
+        self.random_turn_interval = self.declare_parameter(
+            'random_turn_interval', 1.0 * FOOT).value            # m
+        self.random_turn_max = math.radians(self.declare_parameter(
+            'random_turn_max_deg', 15.0).value)
+        self.heading_tolerance = math.radians(self.declare_parameter(
+            'heading_tolerance_deg', 3.0).value)
+        self.teleop_timeout = self.declare_parameter(
+            'teleop_timeout', 0.5).value                         # s
+        rate = self.declare_parameter('control_rate_hz', 10.0).value
+
+        cmd_type = TwistStamped if self.stamped else Twist
+        self.cmd_pub = self.create_publisher(cmd_type, '/cmd_vel', 10)
+
+        self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.create_subscription(Twist, '/teleop_cmd', self.teleop_callback, 10)
+        self.create_subscription(
+            HazardDetectionVector, '/hazard_detection',
+            self.hazard_callback, qos_profile_sensor_data)
+        self.create_subscription(
+            cmd_type, '/teleop_cmd', self.teleop_callback, 10)
 
-        # Publishers
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.map_pub = self.create_publisher(OccupancyGrid, '/map', 10)
+        # Used to find where the lidar points relative to the robot base.
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # Robot Pose (Odometry)
-        self.robot_x = 0.0
-        self.robot_y = 0.0
-        self.current_yaw = 0.0
-
-        # Laser Scan Data
-        self.front_left_dist = 10.0
-        self.front_right_dist = 10.0
+        # Sensor state.
         self.bumper_hit = False
+        self.front_left_dist = math.inf
+        self.front_right_dist = math.inf
+        self.scan_yaw_offset = None
 
-        # Behavior State Tracking
-        self.teleop_cmd = None
-        self.teleop_timer = 0
-        
-        # Priority 3: Escape (Fixed Action Pattern)
-        self.is_escaping = False
-        self.escape_target_yaw = 0.0
+        # Odometry state.
+        self.current_yaw = None
+        self.last_x = None
+        self.last_y = None
+        self.forward_travel = 0.0
 
-        # Priority 5: Wander Distance Tracking
-        self.last_x = 0.0
-        self.last_y = 0.0
-        self.distance_traveled = 0.0
+        # Teleop state.
+        self.teleop_twist = None
+        self.teleop_time = None
 
-        # Occupancy Grid Parameters (10m x 10m grid, 0.05m resolution)
-        self.map_res = 0.05
-        self.map_width = 200
-        self.map_height = 200
-        self.map_origin_x = -5.0
-        self.map_origin_y = -5.0
-        self.grid_data = [-1] * (self.map_width * self.map_height)  # -1 = unknown
+        # Latched turn used by escape (fixed action pattern) and random turn.
+        self.turn_target = None
+        self.turn_owner = None
 
-        # Main Loop Timer (10 Hz)
-        self.create_timer(0.1, self.control_loop)
+        # Highest priority first; see module docstring.
+        self.behaviors = (
+            ('halt', self.halt),
+            ('teleop', self.teleop),
+            ('escape', self.escape),
+            ('avoid', self.avoid),
+            ('random_turn', self.random_turn),
+            ('forward', self.forward),
+        )
+        self.active_behavior = None
 
-    def scan_callback(self, msg: LaserScan):
-        num_samples = len(msg.ranges)
-        if num_samples == 0:
-            return
+        self.create_timer(1.0 / rate, self.control_loop)
 
-        mid = num_samples // 2
-        span = int(num_samples * (30 / 360.0))  # 30-degree forward arc
+    # ------------------------------------------------------------------
+    # Sensor callbacks
+    # ------------------------------------------------------------------
 
-        left_sector = [r for r in msg.ranges[mid:mid+span] if msg.range_min < r < msg.range_max]
-        right_sector = [r for r in msg.ranges[mid-span:mid] if msg.range_min < r < msg.range_max]
+    def hazard_callback(self, msg):
+        """Record whether any bumper is currently pressed."""
+        self.bumper_hit = any(
+            d.type == HazardDetection.BUMP for d in msg.detections)
 
-        self.front_left_dist = min(left_sector) if left_sector else 10.0
-        self.front_right_dist = min(right_sector) if right_sector else 10.0
+    def teleop_callback(self, msg):
+        """Store the latest keyboard command and when it arrived."""
+        self.teleop_twist = msg.twist if self.stamped else msg
+        self.teleop_time = self.get_clock().now()
 
-        # Priority 1 Trigger: Very close physical contact (< 0.16m)
-        min_overall = min([r for r in msg.ranges if msg.range_min < r < msg.range_max] or [10.0])
-        self.bumper_hit = min_overall < 0.16
+    def odom_callback(self, msg):
+        """Track heading and distance travelled forward (for random turn)."""
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        self.current_yaw = yaw_from_quaternion(msg.pose.pose.orientation)
 
-        # Perform Mapping update using latest scan
-        self.update_occupancy_grid(msg)
+        if self.last_x is not None:
+            # Only motion along the heading counts; spinning or backing up
+            # does not add to the 1 ft counter.
+            forward = ((x - self.last_x) * math.cos(self.current_yaw)
+                       + (y - self.last_y) * math.sin(self.current_yaw))
+            if forward > 0.0:
+                self.forward_travel += forward
+        self.last_x = x
+        self.last_y = y
 
-    def odom_callback(self, msg: Odometry):
-        self.robot_x = msg.pose.pose.position.x
-        self.robot_y = msg.pose.pose.position.y
+    def scan_callback(self, msg):
+        """Find the closest obstacle in the front-left and front-right arcs."""
+        offset = self.lidar_yaw_offset(msg.header.frame_id)
+        left = math.inf
+        right = math.inf
+        for i, r in enumerate(msg.ranges):
+            if not (msg.range_min < r < msg.range_max):
+                continue
+            # Beam angle in the robot's frame (0 = straight ahead, + = left),
+            # so this works however the lidar is mounted or configured.
+            angle = normalize_angle(
+                msg.angle_min + i * msg.angle_increment + offset)
+            if 0.0 <= angle <= self.front_half_angle:
+                left = min(left, r)
+            elif -self.front_half_angle <= angle < 0.0:
+                right = min(right, r)
+        self.front_left_dist = left
+        self.front_right_dist = right
 
-        # Extract yaw angle from orientation quaternion
-        q = msg.pose.pose.orientation
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+    def lidar_yaw_offset(self, lidar_frame):
+        """Return the lidar's yaw relative to the base frame (cached)."""
+        if self.scan_yaw_offset is not None:
+            return self.scan_yaw_offset
+        if lidar_frame in ('', self.base_frame):
+            self.scan_yaw_offset = 0.0
+            return 0.0
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.base_frame, lidar_frame, Time())
+        except TransformException as ex:
+            self.get_logger().warn(
+                f'No TF {self.base_frame} <- {lidar_frame} yet ({ex}); '
+                'assuming the lidar faces forward.',
+                throttle_duration_sec=5.0)
+            return 0.0
+        self.scan_yaw_offset = yaw_from_quaternion(tf.transform.rotation)
+        self.get_logger().info(
+            f'Lidar yaw offset: {math.degrees(self.scan_yaw_offset):.1f} deg')
+        return self.scan_yaw_offset
 
-        # Track accumulated travel distance for Priority 5 (Wander)
-        step_dist = math.hypot(self.robot_x - self.last_x, self.robot_y - self.last_y)
-        self.distance_traveled += step_dist
-        self.last_x = self.robot_x
-        self.last_y = self.robot_y
-
-    def teleop_callback(self, msg: Twist):
-        self.teleop_cmd = msg
-        self.teleop_timer = 10  # Active for 1 second (10 x 0.1s cycles)
-
-    def update_occupancy_grid(self, scan: LaserScan):
-        angle = scan.angle_min
-        for r in scan.ranges:
-            if scan.range_min < r < scan.range_max:
-                hit_x = self.robot_x + r * math.cos(self.current_yaw + angle)
-                hit_y = self.robot_y + r * math.sin(self.current_yaw + angle)
-
-                gx = int((hit_x - self.map_origin_x) / self.map_res)
-                gy = int((hit_y - self.map_origin_y) / self.map_res)
-
-                if 0 <= gx < self.map_width and 0 <= gy < self.map_height:
-                    idx = gy * self.map_width + gx
-                    self.grid_data[idx] = 100
-
-            angle += scan.angle_increment
-
-        grid_msg = OccupancyGrid()
-        grid_msg.header = Header(stamp=self.get_clock().now().to_msg(), frame_id='odom')
-        grid_msg.info.resolution = self.map_res
-        grid_msg.info.width = self.map_width
-        grid_msg.info.height = self.map_height
-        grid_msg.info.origin.position.x = self.map_origin_x
-        grid_msg.info.origin.position.y = self.map_origin_y
-        grid_msg.data = self.grid_data
-        self.map_pub.publish(grid_msg)
+    # ------------------------------------------------------------------
+    # Arbitration
+    # ------------------------------------------------------------------
 
     def control_loop(self):
-        cmd = Twist()
-        dist_threshold = 0.305  # 1 foot (~0.305 meters)
-
-        # Priority 1: Halt on Collision (Bumper)
-        if self.bumper_hit:
-            self.get_logger().info('P1: Bumper/Collision detected! Halting.', throttle_duration_sec=1.0)
-            cmd.linear.x = 0.0
-            cmd.angular.z = 0.0
-            self.cmd_pub.publish(cmd)
-            return
-
-        # Priority 2: Manual Keyboard Commands
-        if self.teleop_timer > 0 and self.teleop_cmd is not None:
-            self.get_logger().info('P2: User Teleop active.', throttle_duration_sec=1.0)
-            self.teleop_timer -= 1
-            self.cmd_pub.publish(self.teleop_cmd)
-            return
-
-        # Priority 3: Escape (Symmetric obstacles within 1ft)
-        is_symmetric = abs(self.front_left_dist - self.front_right_dist) < 0.08
-
-        if self.is_escaping:
-            angle_diff = abs(self.normalize_angle(self.current_yaw - self.escape_target_yaw))
-            if angle_diff > math.radians(15):
-                cmd.angular.z = 0.5
+        """Publish the command of the highest-priority active behavior."""
+        if self.current_yaw is None:
+            return  # No odometry yet.
+        for name, behavior in self.behaviors:
+            cmd = behavior()
+            if cmd is not None:
+                if name != self.active_behavior:
+                    self.get_logger().info(f'Behavior: {name}')
+                    self.active_behavior = name
                 self.cmd_pub.publish(cmd)
                 return
-            else:
-                self.is_escaping = False
 
-        elif (self.front_left_dist < dist_threshold and 
-              self.front_right_dist < dist_threshold and is_symmetric):
-            self.get_logger().info('P3: Symmetric obstacle within 1ft. Escaping...')
-            self.is_escaping = True
-            turn_rad = math.radians(180 + random.uniform(-30, 30))
-            self.escape_target_yaw = self.normalize_angle(self.current_yaw + turn_rad) % (2 * math.pi)
-            cmd.linear.x = -0.1
-            cmd.angular.z = 0.5
-            self.cmd_pub.publish(cmd)
-            return
+    # ------------------------------------------------------------------
+    # Behaviors (highest priority first)
+    # ------------------------------------------------------------------
 
-        # Priority 4: Avoid (Asymmetric obstacles within 1ft)
-        if self.front_left_dist < dist_threshold or self.front_right_dist < dist_threshold:
-            self.get_logger().info('P4: Asymmetric obstacle within 1ft. Avoiding...')
-            cmd.linear.x = 0.05
-            if self.front_left_dist < self.front_right_dist:
-                cmd.angular.z = -0.4
-            else:
-                cmd.angular.z = 0.4
-            self.cmd_pub.publish(cmd)
-            return
+    def halt(self):
+        """1. Stop while any bumper is pressed."""
+        if self.bumper_hit:
+            return self.make_cmd(0.0, 0.0)
+        return None
 
-        # Priority 5: Random Turn (+/- 15 deg) per 1 ft traveled
-        if self.distance_traveled >= dist_threshold:
-            self.get_logger().info('P5: 1ft Traveled. Applying random heading jitter.')
-            self.distance_traveled = 0.0
-            cmd.linear.x = 0.15
-            cmd.angular.z = math.radians(random.uniform(-15, 15))
-            self.cmd_pub.publish(cmd)
-            return
+    def teleop(self):
+        """2. Pass through keyboard commands received recently."""
+        if self.teleop_twist is None:
+            return None
+        age = self.get_clock().now() - self.teleop_time
+        if age > Duration(seconds=self.teleop_timeout):
+            return None
+        return self.make_cmd(
+            self.teleop_twist.linear.x, self.teleop_twist.angular.z)
 
-        # Priority 6: Drive Forward (Default)
-        cmd.linear.x = 0.2
-        cmd.angular.z = 0.0
-        self.cmd_pub.publish(cmd)
+    def escape(self):
+        """
+        3. Turn away (180 +/- 30 deg) from symmetric obstacles within 1 ft.
 
-    def normalize_angle(self, angle):
-        return math.atan2(math.sin(angle), math.cos(angle))
+        Fixed action pattern: once triggered, the turn runs to completion
+        even if the obstacles are no longer seen.
+        """
+        if self.turn_owner == 'escape':
+            return self.continue_turn()
+        left = self.front_left_dist
+        right = self.front_right_dist
+        if (left < self.obstacle_distance and right < self.obstacle_distance
+                and abs(left - right) < self.symmetry_tolerance):
+            angle = self.escape_angle + random.uniform(
+                -self.escape_spread, self.escape_spread)
+            self.start_turn('escape', angle)
+            return self.continue_turn()
+        return None
+
+    def avoid(self):
+        """
+        4. Turn away from the closer side of an asymmetric obstacle.
+
+        Reflex: acts only while an obstacle is within 1 ft in front.
+        """
+        left = self.front_left_dist
+        right = self.front_right_dist
+        if left < self.obstacle_distance or right < self.obstacle_distance:
+            if self.turn_owner == 'random_turn':
+                # A pending random turn is stale once we have had to avoid.
+                self.turn_owner = None
+                self.turn_target = None
+            # Closer on the left -> turn right (negative z), and vice versa.
+            angular = -self.turn_speed if left < right else self.turn_speed
+            return self.make_cmd(0.0, angular)
+        return None
+
+    def random_turn(self):
+        """5. After every 1 ft of forward travel, turn U(-15, +15) deg."""
+        if self.turn_owner == 'random_turn':
+            return self.continue_turn()
+        if self.forward_travel >= self.random_turn_interval:
+            self.forward_travel = 0.0
+            self.start_turn('random_turn', random.uniform(
+                -self.random_turn_max, self.random_turn_max))
+            return self.continue_turn()
+        return None
+
+    def forward(self):
+        """6. Drive straight ahead."""
+        return self.make_cmd(self.forward_speed, 0.0)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def start_turn(self, owner, angle):
+        """Latch an in-place turn of ``angle`` radians from current heading."""
+        self.turn_owner = owner
+        self.turn_target = normalize_angle(self.current_yaw + angle)
+
+    def continue_turn(self):
+        """Rotate toward the latched target; return None once reached."""
+        error = normalize_angle(self.turn_target - self.current_yaw)
+        if abs(error) <= self.heading_tolerance:
+            self.turn_owner = None
+            self.turn_target = None
+            return None
+        return self.make_cmd(0.0, math.copysign(self.turn_speed, error))
+
+    def make_cmd(self, linear, angular):
+        """Build a Twist or TwistStamped velocity command."""
+        if self.stamped:
+            cmd = TwistStamped()
+            cmd.header.stamp = self.get_clock().now().to_msg()
+            cmd.header.frame_id = self.base_frame
+            twist = cmd.twist
+        else:
+            cmd = Twist()
+            twist = cmd
+        twist.linear.x = float(linear)
+        twist.angular.z = float(angular)
+        return cmd
 
 
 def main(args=None):
+    """Run the subsumption controller node."""
     rclpy.init(args=args)
     node = SubsumptionController()
     try:
@@ -203,8 +338,7 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

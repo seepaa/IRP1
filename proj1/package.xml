@@ -3,12 +3,29 @@
 <package format="3">
   <name>proj1</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>
+    CS 4023/5023 Project 1: reactive (subsumption-style) controller and
+    occupancy-grid mapper for a simulated TurtleBot 4 in Gazebo Harmonic.
+  </description>
   <maintainer email="thomaskase@todo.todo">thomaskase</maintainer>
   <license>TODO: License declaration</license>
 
-  <depend>rclpy</depend>
-  <depend>geometry_msgs</depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>irobot_create_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>turtlebot4_gz_bringup</exec_depend>
+  <exec_depend>turtlebot4_description</exec_depend>
+  <exec_depend>irobot_create_description</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

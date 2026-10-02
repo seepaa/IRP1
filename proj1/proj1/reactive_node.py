@@ -95,7 +95,7 @@ class SubsumptionController(Node):
         self.front_half_angle = math.radians(self.declare_parameter(
             'front_half_angle_deg', 30.0).value)
         self.symmetry_tolerance = self.declare_parameter(
-            'symmetry_tolerance', 0.08).value                    # m
+            'symmetry_tolerance', 0.15).value                    # m
         self.escape_angle = math.radians(self.declare_parameter(
             'escape_angle_deg', 180.0).value)
         self.escape_spread = math.radians(self.declare_parameter(
@@ -278,6 +278,11 @@ class SubsumptionController(Node):
             return self.continue_turn()
         left = self.front_left_dist
         right = self.front_right_dist
+        if left < self.obstacle_distance and right < self.obstacle_distance:
+            self.get_logger().info(
+                f"L: {left:.3f}, R: {right:.3f}, Diff: {abs(left - right):.3f} (Sym Tol: {self.symmetry_tolerance})",
+                throttle_duration_sec=0.5
+        )
         if (left < self.obstacle_distance and right < self.obstacle_distance
                 and abs(left - right) < self.symmetry_tolerance):
             angle = self.escape_angle + random.uniform(

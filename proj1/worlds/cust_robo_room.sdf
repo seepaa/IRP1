@@ -51,10 +51,18 @@
         <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
       </link>
-      <link name="wall_outer_east">
-        <pose>2.286 0 1.25 0 0 0</pose>
-        <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
-        <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
+      <!-- Outer east wall of the long (20 ft) hallway branch, split by the
+           5 ft exit door 5 ft from the branch's closed north end
+           (gap y = 0 .. 1.524). -->
+      <link name="wall_outer_east_north">
+        <pose>2.286 2.286 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></visual>
+      </link>
+      <link name="wall_outer_east_south">
+        <pose>2.286 -1.524 1.25 0 0 0</pose>
+        <collision name="col"><geometry><box><size>0.15 3.048 2.5</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.15 3.048 2.5</size></box></geometry></visual>
       </link>
       <link name="wall_inner_vertical_top">
         <pose>0.762 2.286 1.25 0 0 0</pose>

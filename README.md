@@ -35,7 +35,8 @@ Launch (terminal 1):
 
 ```bash
 ros2 launch proj1 simulation.launch.py
-# optional: x:= y:= yaw:=  (start pose), world:= world_name:=  (other world)
+# optional: x:= y:= yaw:=  (start pose), world:=/path/to/other.sdf
+# (its <world name> is read from the file automatically)
 ```
 
 Keyboard control (terminal 2). Keys go to `/teleop_cmd`, not `/cmd_vel`,

@@ -4,12 +4,15 @@ Launch Project 1: Gazebo world, TurtleBot 4, reactive controller and mapper.
 Everything the TA may change is a launch argument, e.g.::
 
     ros2 launch proj1 simulation.launch.py x:=0.5 y:=-2.0 yaw:=1.57
-    ros2 launch proj1 simulation.launch.py \
-        world:=/path/to/other.sdf world_name:=<its <world name="...">>
+    ros2 launch proj1 simulation.launch.py world:=/path/to/other.sdf
+
+The <world name="..."> inside the .sdf is read automatically; pass
+world_name:=... only to override it.
 """
 
 import os
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -17,6 +20,7 @@ from launch.actions import AppendEnvironmentVariable
 from launch.actions import DeclareLaunchArgument
 from launch.actions import ExecuteProcess
 from launch.actions import IncludeLaunchDescription
+from launch.actions import OpaqueFunction
 from launch.actions import TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -24,12 +28,60 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+# Retry for up to ~2 minutes: on a slow machine the Create 3's
+# /motion_control node can take a while to come up, and a single attempt
+# would fail silently and leave the bump reflexes on.
+DISABLE_REFLEXES_SCRIPT = """
+for i in $(seq 1 60); do
+  out=$(ros2 param set /motion_control reflexes_enabled false 2>&1)
+  case "$out" in
+    *successful*) echo "[proj1] Create 3 reflexes disabled"; exit 0 ;;
+  esac
+  sleep 2
+done
+echo "[proj1] WARNING: could not disable Create 3 reflexes: $out" >&2
+exit 1
+"""
+
+
+def world_name_from_sdf(path):
+    """Return the name attribute of the <world> element in an SDF file."""
+    world = ET.parse(path).getroot().find('world')
+    if world is None or not world.get('name'):
+        raise RuntimeError(f'No <world name="..."> found in {path}')
+    return world.get('name')
+
+
+def spawn_robot(context):
+    """Spawn the TurtleBot 4 into the world named inside the .sdf file."""
+    world_name = LaunchConfiguration('world_name').perform(context)
+    if not world_name:
+        world_name = world_name_from_sdf(
+            LaunchConfiguration('world').perform(context))
+    pkg_tb4_gz_bringup = get_package_share_directory('turtlebot4_gz_bringup')
+    # Spawns the robot and dock, and bridges /scan, /odom, /cmd_vel,
+    # /hazard_detection, /tf etc. between Gazebo and ROS. The /scan bridge
+    # is built from the world name, so a wrong name leaves the robot blind.
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_tb4_gz_bringup, 'launch',
+                         'turtlebot4_spawn.launch.py')),
+        launch_arguments={
+            'world': world_name,
+            'model': LaunchConfiguration('model'),
+            'rviz': LaunchConfiguration('rviz'),
+            'x': LaunchConfiguration('x'),
+            'y': LaunchConfiguration('y'),
+            'z': LaunchConfiguration('z'),
+            'yaw': LaunchConfiguration('yaw'),
+        }.items(),
+    )]
+
 
 def generate_launch_description():
     """Start Gazebo, spawn the TurtleBot 4, run controller and mapper."""
     pkg_share = get_package_share_directory('proj1')
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
-    pkg_tb4_gz_bringup = get_package_share_directory('turtlebot4_gz_bringup')
     pkg_tb4_description = get_package_share_directory(
         'turtlebot4_description')
     pkg_create_description = get_package_share_directory(
@@ -42,10 +94,12 @@ def generate_launch_description():
             'world', default_value=default_world,
             description='Path to the Gazebo world .sdf file'),
         # The TurtleBot 4 bridges need the <world name="..."> from inside
-        # the .sdf, which is not the same as the file name.
+        # the .sdf, which is not the same as the file name. Empty means
+        # "read it from the world file".
         DeclareLaunchArgument(
-            'world_name', default_value='project1_world',
-            description='The <world name="..."> declared in the world file'),
+            'world_name', default_value='',
+            description='Override for the <world name="..."> in the world '
+                        'file (default: read from the file)'),
         DeclareLaunchArgument(
             'model', default_value='standard',
             choices=['standard', 'lite'], description='TurtleBot 4 model'),
@@ -96,22 +150,8 @@ def generate_launch_description():
         arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
     )
 
-    # Spawns the robot and dock, and bridges /scan, /odom, /cmd_vel,
-    # /hazard_detection, /tf etc. between Gazebo and ROS.
-    robot_spawn = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_tb4_gz_bringup, 'launch',
-                         'turtlebot4_spawn.launch.py')),
-        launch_arguments={
-            'world': LaunchConfiguration('world_name'),
-            'model': LaunchConfiguration('model'),
-            'rviz': LaunchConfiguration('rviz'),
-            'x': LaunchConfiguration('x'),
-            'y': LaunchConfiguration('y'),
-            'z': LaunchConfiguration('z'),
-            'yaw': LaunchConfiguration('yaw'),
-        }.items(),
-    )
+    # Resolved at launch time so the world name can be read from the file.
+    robot_spawn = OpaqueFunction(function=spawn_robot)
 
     controller = Node(
         package='proj1',
@@ -134,13 +174,13 @@ def generate_launch_description():
     )
 
     # The Create 3 base backs away from bumps on its own by default, which
-    # would fight "halt on bumper". Switch that off once its node is up.
+    # would fight "halt on bumper". Switch that off once its node is up,
+    # retrying until it is (see DISABLE_REFLEXES_SCRIPT).
     disable_reflexes = TimerAction(
-        period=20.0,
+        period=5.0,
         condition=IfCondition(LaunchConfiguration('disable_reflexes')),
         actions=[ExecuteProcess(
-            cmd=['ros2', 'param', 'set', '/motion_control',
-                 'reflexes_enabled', 'false'],
+            cmd=['bash', '-c', DISABLE_REFLEXES_SCRIPT],
             output='screen')],
     )
 

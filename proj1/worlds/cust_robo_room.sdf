@@ -2,6 +2,14 @@
 <sdf version="1.7">
   <world name="project1_world">
 
+    <!-- Core Gazebo systems only. The TurtleBot 4 model loads its own
+         sensor systems (lidar, IMU, bumper contact); declaring them here too
+         starts a second Sensors system, which crashes Gazebo (OGRE
+         "material datablock ... already exists"). -->
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
     <!-- Directional Light -->
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
@@ -25,56 +33,44 @@
       </link>
     </model>
 
-    <!-- Environment Geometry with Properly Connected Inner Walls -->
+    <!-- Environment Geometry -->
     <model name="project1_environment">
       <static>true</static>
-
-      <!-- 1. Outer Bounding Wall - North / Top (15ft / 4.572m) -->
       <link name="wall_outer_north">
         <pose>0 3.048 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></visual>
       </link>
-
-      <!-- 2. Outer Bounding Wall - South / Bottom (15ft / 4.572m) -->
       <link name="wall_outer_south">
         <pose>0 -3.048 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>4.572 0.15 2.5</size></box></geometry></visual>
       </link>
-
-      <!-- 3. Outer Bounding Wall - West / Left (20ft / 6.096m) -->
       <link name="wall_outer_west">
         <pose>-2.286 0 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
       </link>
-
-      <!-- 4. Outer Bounding Wall - East / Right (20ft / 6.096m) -->
       <link name="wall_outer_east">
         <pose>2.286 0 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>0.15 6.096 2.5</size></box></geometry></visual>
       </link>
-
       <link name="wall_inner_vertical_top">
         <pose>0.762 2.286 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></visual>
       </link>
-
       <link name="wall_inner_south_bottom">
         <pose>-0.762 -1.524 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>3.048 0.15 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>3.048 0.15 2.5</size></box></geometry></visual>
       </link>
-
       <link name="wall_inner_vertical_bottom">
         <pose>0.762 -0.762 1.25 0 0 0</pose>
         <collision name="col"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></collision>
         <visual name="vis"><geometry><box><size>0.15 1.524 2.5</size></box></geometry></visual>
       </link>
-
     </model>
 
   </world>

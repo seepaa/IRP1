@@ -47,6 +47,22 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args \
   -p stamped:=true -r cmd_vel:=/teleop_cmd
 ```
 
+Click into this terminal before pressing keys. Each key press holds control
+for `teleop_timeout` (5 s of sim time, longer in real time when Gazebo runs
+slow), then the robot goes back to driving itself.
+
+If the robot ignores the keyboard, check that key presses are reaching the
+controller (terminal 3):
+
+```bash
+ros2 topic echo /teleop_cmd
+```
+
+Press a key in the teleop terminal. A message should appear here and the
+controller should log `Behavior: teleop`. If nothing appears, the problem is
+on the keyboard side (wrong terminal focused, missing remap, or teleop not
+running), not in the controller.
+
 View the map: `rviz2`, set Fixed Frame to `odom`, add a Map display on `/map`.
 
 If `ros2 topic info /cmd_vel` shows `geometry_msgs/msg/Twist`, relaunch with

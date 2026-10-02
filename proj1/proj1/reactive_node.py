@@ -95,7 +95,7 @@ class SubsumptionController(Node):
 
     def teleop_callback(self, msg: Twist):
         self.teleop_cmd = msg
-        self.teleop_timer = 10  # Active for 1 second (10 x 0.1s cycles)
+        self.teleop_timer = 100  # Active for 1 second (10 x 0.1s cycles)
 
     def update_occupancy_grid(self, scan: LaserScan):
         angle = scan.angle_min

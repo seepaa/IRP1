@@ -1,0 +1,166 @@
+% CS 4023/5023 Project 1 -- Robot Code Documentation (Section 5.4)
+% OUTLINE: each section lists what to write. Replace the bullet prompts
+% with prose. Target length 1.5--2 pages of text (about 80 characters per
+% line, 50 lines per page); figures and tables do not count toward it.
+
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\newcommand{\prompt}[1]{\textit{[#1]}}
+
+\title{Project 1: Robot Code Documentation}
+\author{Team members: \prompt{names}}
+\date{\prompt{date}}
+
+\begin{document}
+\maketitle
+
+% ---------------------------------------------------------------------
+\section{Overview}
+\begin{itemize}
+  \item \prompt{One paragraph: what the code does.} Two ROS~2 Python nodes in
+        package \texttt{proj1}: \texttt{reactive\_node.py}
+        (class \texttt{SubsumptionController}) drives the TurtleBot~4;
+        \texttt{occupancy\_mapper.py} (class \texttt{OccupancyMapper})
+        builds the map. They run independently and share only sensor topics.
+  \item \prompt{Figure 1: node/topic graph} --
+        \texttt{/scan}, \texttt{/odom}, \texttt{/hazard\_detection},
+        \texttt{/teleop\_cmd} $\rightarrow$ controller $\rightarrow$
+        \texttt{/cmd\_vel}; \texttt{/scan}, \texttt{/odom}, TF
+        $\rightarrow$ mapper $\rightarrow$ \texttt{/map}.
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Reactive Architecture}
+\subsection{Which architecture}
+\begin{itemize}
+  \item \prompt{Name it.} Priority-based pseudo-subsumption in the style of
+        Jones et al.: every behavior proposes a command or abstains, and the
+        highest-priority proposal wins.
+  \item \prompt{Contrast briefly with Brooks' subsumption (suppression and
+        inhibition wires between layers) and with schema theory (vector
+        summation of motor schemas), and say what we did not do.}
+\end{itemize}
+
+\subsection{Why we chose it}
+\begin{itemize}
+  \item \prompt{Reasons, e.g.: the brief gives a strict priority ordering,
+        which maps directly onto a fixed arbitration list; behaviors are
+        independent and easy to test one at a time; no vector tuning as in
+        schemas; simple to explain and debug.}
+\end{itemize}
+
+\subsection{Where the code embodies it}
+\begin{itemize}
+  \item \texttt{self.behaviors} tuple: the priority order, highest first.
+  \item \texttt{control\_loop()}: the arbiter; publishes the first
+        non-\texttt{None} command each cycle (10~Hz).
+  \item Each behavior is one method returning a command or \texttt{None}.
+  \item \prompt{Figure 2: priority stack diagram, halt on top,
+        forward at the bottom, arbiter on the right.}
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Behaviors}
+\prompt{One short paragraph per behavior, or rely mostly on the table.
+Point out reflex vs.\ fixed action pattern explicitly.}
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\# & Method & Trigger & Response / type \\
+\midrule
+1 & \texttt{halt} & any bump in \texttt{/hazard\_detection} & stop; reflex \\
+2 & \texttt{teleop} & key command $<0.5$\,s old & pass through \\
+3 & \texttt{escape} & both front arcs $<1$\,ft, nearly equal & turn
+    $180^\circ\pm30^\circ$; FAP \\
+4 & \texttt{avoid} & either front arc $<1$\,ft & turn away from closer
+    side; reflex \\
+5 & \texttt{random\_turn} & 1\,ft of forward travel & turn
+    $U(-15^\circ,15^\circ)$ \\
+6 & \texttt{forward} & always & drive at 0.2\,m/s \\
+\bottomrule
+\end{tabular}
+\caption{Behaviors, highest priority first.}
+\end{table}
+
+\begin{itemize}
+  \item \prompt{Explain why escape is a fixed action pattern: the target
+        heading is latched in \texttt{turn\_target}/\texttt{turn\_owner}
+        and the turn finishes even after the obstacle disappears.}
+  \item \prompt{Explain why avoid is a reflex: it is recomputed every
+        cycle and stops as soon as nothing is within 1~ft.}
+  \item \prompt{Note that avoid cancels a pending random turn.}
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Data Structures}
+\subsection{Controller}
+\begin{itemize}
+  \item Sensor state: \texttt{bumper\_hit}, \texttt{front\_left\_dist},
+        \texttt{front\_right\_dist}, cached \texttt{scan\_yaw\_offset}.
+  \item Odometry state: \texttt{current\_yaw}, last position,
+        \texttt{forward\_travel} accumulator.
+  \item Teleop state: last twist and its arrival time.
+  \item Latched turn: \texttt{turn\_target} (absolute heading) and
+        \texttt{turn\_owner} (which behavior owns it).
+  \item ROS parameters for every threshold (speeds, 1~ft distance,
+        $\pm30^\circ$ front arc, symmetry tolerance, turn angles).
+        \prompt{Say why: the TA can retune without editing code.}
+\end{itemize}
+
+\subsection{Mapper}
+\begin{itemize}
+  \item 2-D NumPy \texttt{float32} array of log-odds, 0.05\,m cells,
+        20\,m $\times$ 20\,m centered on the start pose.
+  \item Boolean \texttt{seen} mask so never-observed cells stay unknown
+        ($-1$).
+  \item Cached lidar mount pose $(x, y, \text{yaw})$ in the base frame.
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Algorithms}
+\begin{itemize}
+  \item \textbf{Front-obstacle detection:} convert each beam angle into the
+        robot frame using the lidar's TF yaw offset, keep the minimum range
+        in the left ($0$ to $+30^\circ$) and right ($-30^\circ$ to $0$)
+        arcs. \prompt{Why TF: robust if the TA moves or rotates the lidar.}
+  \item \textbf{Symmetry test:} both arcs $<$ 1~ft and
+        $|d_L - d_R| <$ tolerance $\Rightarrow$ escape; otherwise avoid.
+  \item \textbf{Distance for random turn:} project each odometry step onto
+        the heading; only positive (forward) motion counts.
+  \item \textbf{Latched turns:} target = current yaw + angle, wrapped to
+        $[-\pi,\pi]$; rotate at fixed speed until within $3^\circ$.
+  \item \textbf{Occupancy mapping:} per scan, transform the lidar pose into
+        the odom frame, ray-cast each beam at half-cell steps, add
+        $L_{\text{free}}$ to traversed cells and $L_{\text{occ}}$ to the end
+        cell, clamp to $\pm5$, publish $p = 1 - 1/(1+e^{l})$ scaled to
+        0--100. \prompt{Cite the log-odds occupancy-grid formulation.}
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Design Decisions and Limitations}
+\begin{itemize}
+  \item \prompt{Map is in the odom frame, so it drifts with odometry; no
+        localization, as the brief does not require navigation.}
+  \item \prompt{``1~ft in front'' is measured from the lidar.}
+  \item \prompt{Halt outranks teleop, so a pressed bumper blocks keyboard
+        control too.}
+  \item \prompt{Create~3 built-in bump reflexes are disabled at launch so
+        that halt is in charge.}
+  \item \prompt{Coding standards: ROS~2 Python style, flake8 and pep257
+        tests, object-oriented nodes.}
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Sources and Credit}
+\prompt{Required by Section~6 of the assignment. List every source of code
+or text and which parts are original, changed, or taken from where
+(including tools used to help write code or documents). List who on the
+team wrote which parts.}
+
+\end{document}

@@ -20,10 +20,11 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='thomaskase',
-    maintainer_email='thomaskase@todo.todo',
-    description='ROS 2 project assignment',
-    license='TODO: License declaration',
+    maintainer='Thomas Kaseca',
+    maintainer_email='112017654+ThoamsKaseca@users.noreply.github.com',
+    description=('CS 4023/5023 Project 1: reactive controller and occupancy-grid '
+                 'mapper for a simulated TurtleBot 4'),
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',

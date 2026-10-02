@@ -7,8 +7,8 @@
     CS 4023/5023 Project 1: reactive (subsumption-style) controller and
     occupancy-grid mapper for a simulated TurtleBot 4 in Gazebo Harmonic.
   </description>
-  <maintainer email="thomaskase@todo.todo">thomaskase</maintainer>
-  <license>TODO: License declaration</license>
+  <maintainer email="112017654+ThoamsKaseca@users.noreply.github.com">Thomas Kaseca</maintainer>
+  <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>

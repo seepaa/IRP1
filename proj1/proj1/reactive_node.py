@@ -352,6 +352,17 @@ class SubsumptionController(Node):
         twist.linear.x = float(linear)
         twist.angular.z = float(angular)
         return cmd
+    
+    def lookup_sensor_transform(tf_buffer, target_frame, source_frame):
+    #Helper to lookup sensor transforms using tf2.
+        try:
+            return tf_buffer.lookup_transform(
+                target_frame,
+                source_frame,
+                rclpy.time.Time()
+            )
+        except Exception:
+            return None
 
 
 def main(args=None):

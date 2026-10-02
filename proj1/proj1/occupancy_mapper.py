@@ -124,6 +124,16 @@ class OccupancyMapper(Node):
         sy = ry + mx * math.sin(ryaw) + my * math.cos(ryaw)
         syaw = ryaw + myaw
 
+        # Wheel slip (e.g. pushing against a wall) can drift odom far from
+        # the start; every scan then lands off the grid and the map stays
+        # unknown, so say so instead of failing silently.
+        if not (self.origin_x <= sx < self.origin_x + self.width * self.resolution
+                and self.origin_y <= sy < self.origin_y + self.height * self.resolution):
+            self.get_logger().warn(
+                f'Robot odom pose ({rx:.1f}, {ry:.1f}) is outside the map '
+                'grid; odometry has probably drifted. Scans are being '
+                'dropped.', throttle_duration_sec=5.0)
+
         ranges = np.asarray(scan.ranges, dtype=np.float32)
         angles = (scan.angle_min + syaw
                   + np.arange(ranges.size) * scan.angle_increment)

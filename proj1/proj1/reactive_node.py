@@ -6,7 +6,9 @@ returns a velocity command when it wants control this cycle, or ``None`` to
 let a lower-priority behavior act (the first non-``None`` command wins):
 
 1. halt        -- stop while any bumper is pressed.
-2. teleop      -- pass through keyboard commands from ``/teleop_cmd``.
+2. teleop      -- keyboard commands from ``/teleop_cmd``. The keyboard node
+                  publishes once per key press, so the last command is held
+                  for ``teleop_timeout`` seconds before autonomy resumes.
 3. escape      -- (roughly) symmetric obstacles within 1 ft in front: turn to
                   face away, 180 +/- 30 deg. Fixed action pattern: once
                   started it finishes even if the obstacle disappears.
@@ -83,8 +85,10 @@ class SubsumptionController(Node):
             'random_turn_max_deg', 15.0).value)
         self.heading_tolerance = math.radians(self.declare_parameter(
             'heading_tolerance_deg', 3.0).value)
+        # teleop_twist_keyboard publishes once per key press, so keep the
+        # last key in charge this long before handing back to autonomy.
         self.teleop_timeout = self.declare_parameter(
-            'teleop_timeout', 0.5).value                         # s
+            'teleop_timeout', 5.0).value                         # s
         rate = self.declare_parameter('control_rate_hz', 10.0).value
 
         cmd_type = TwistStamped if self.stamped else Twist
@@ -234,7 +238,7 @@ class SubsumptionController(Node):
         return None
 
     def teleop(self):
-        """2. Pass through keyboard commands received recently."""
+        """2. Hold the last keyboard command for ``teleop_timeout`` s."""
         if self.teleop_twist is None:
             return None
         age = self.get_clock().now() - self.teleop_time

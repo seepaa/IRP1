@@ -53,6 +53,27 @@ def yaw_from_quaternion(q):
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+def lookup_sensor_transform(tf_buffer, base_frame, sensor_frame):
+    """
+    Look up ``base_frame <- sensor_frame``, or None if not available.
+
+    Gazebo stamps scans with its scoped sensor name, e.g.
+    ``turtlebot4/rplidar_link/rplidar``. If that frame is not in TF, fall
+    back to the link part (``rplidar_link``), which robot_state_publisher
+    always provides.
+    """
+    candidates = [sensor_frame]
+    parts = sensor_frame.split('/')
+    if len(parts) >= 2:
+        candidates.append(parts[-2])
+    for frame in candidates:
+        try:
+            return tf_buffer.lookup_transform(base_frame, frame, Time())
+        except TransformException:
+            continue
+    return None
+
+
 class SubsumptionController(Node):
     """Priority-arbitrated reactive controller (see module docstring)."""
 
@@ -196,12 +217,11 @@ class SubsumptionController(Node):
         if lidar_frame in ('', self.base_frame):
             self.scan_yaw_offset = 0.0
             return 0.0
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                self.base_frame, lidar_frame, Time())
-        except TransformException as ex:
+        tf = lookup_sensor_transform(
+            self.tf_buffer, self.base_frame, lidar_frame)
+        if tf is None:
             self.get_logger().warn(
-                f'No TF {self.base_frame} <- {lidar_frame} yet ({ex}); '
+                f'No TF {self.base_frame} <- {lidar_frame} yet; '
                 'assuming the lidar faces forward.',
                 throttle_duration_sec=5.0)
             return 0.0
@@ -321,7 +341,9 @@ class SubsumptionController(Node):
         """Build a Twist or TwistStamped velocity command."""
         if self.stamped:
             cmd = TwistStamped()
-            cmd.header.stamp = self.get_clock().now().to_msg()
+            # Leave header.stamp at zero: diff_drive_controller then uses its
+            # own clock. A real stamp from our sim clock can lag Gazebo's by
+            # 0.5 s or more on slow machines, and the controller rejects it.
             cmd.header.frame_id = self.base_frame
             twist = cmd.twist
         else:

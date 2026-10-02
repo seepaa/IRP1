@@ -21,11 +21,11 @@ from rclpy.qos import DurabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.qos import QoSProfile
 from rclpy.qos import ReliabilityPolicy
-from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer
-from tf2_ros import TransformException
 from tf2_ros import TransformListener
+
+from proj1.reactive_node import lookup_sensor_transform
 
 L_OCC = 0.85    # log-odds added to a cell a beam ends in
 L_FREE = -0.4   # log-odds added to a cell a beam passes through
@@ -96,12 +96,11 @@ class OccupancyMapper(Node):
         if lidar_frame in ('', self.base_frame):
             self.lidar_mount = (0.0, 0.0, 0.0)
             return self.lidar_mount
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                self.base_frame, lidar_frame, Time())
-        except TransformException as ex:
+        tf = lookup_sensor_transform(
+            self.tf_buffer, self.base_frame, lidar_frame)
+        if tf is None:
             self.get_logger().warn(
-                f'No TF {self.base_frame} <- {lidar_frame} yet ({ex}); '
+                f'No TF {self.base_frame} <- {lidar_frame} yet; '
                 'skipping scan.', throttle_duration_sec=5.0)
             return None
         t = tf.transform

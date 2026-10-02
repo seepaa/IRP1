@@ -56,6 +56,9 @@ them.
 Build and launch (terminal 1):
 
 ```bash
+export ROS_LOCALHOST_ONLY=0
+export ROS_DOMAIN_ID=42
+source /opt/ros/jazzy/setup.bash
 cd ~/ros2_ws
 colcon build --packages-select proj1
 source install/setup.bash
@@ -68,6 +71,10 @@ Keyboard control (terminal 2). Keys go to `/teleop_cmd`, not `/cmd_vel`,
 so the controller stays in charge and a bump still halts the robot:
 
 ```bash
+export ROS_LOCALHOST_ONLY=0
+export ROS_DOMAIN_ID=42
+source /opt/ros/jazzy/setup.bash
+
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true -r cmd_vel:=/teleop_cmd
 ```
 
@@ -80,6 +87,9 @@ If the robot ignores the keyboard, check that key presses are reaching the
 controller (terminal 3):
 
 ```bash
+export ROS_LOCALHOST_ONLY=0
+export ROS_DOMAIN_ID=42
+source /opt/ros/jazzy/setup.bash
 ros2 topic echo /teleop_cmd geometry_msgs/msg/TwistStamped
 ```
 
@@ -95,6 +105,9 @@ running), not in the controller.
 Open RViz (terminal 4):
 
 ```bash
+export ROS_LOCALHOST_ONLY=0
+export ROS_DOMAIN_ID=42
+source /opt/ros/jazzy/setup.bash
 rviz2
 ```
 

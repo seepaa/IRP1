@@ -55,10 +55,12 @@ If the robot ignores the keyboard, check that key presses are reaching the
 controller (terminal 3):
 
 ```bash
-ros2 topic echo /teleop_cmd
+ros2 topic echo /teleop_cmd geometry_msgs/msg/TwistStamped
 ```
 
-Press a key in the teleop terminal. A message should appear here and the
+(Give the type explicitly; without it, `echo` fails with "Could not determine
+the type" if the teleop node is not up yet. Use `geometry_msgs/msg/Twist` with
+`stamped:=false`.) Press a key in the teleop terminal. A message should appear here and the
 controller should log `Behavior: teleop`. If nothing appears, the problem is
 on the keyboard side (wrong terminal focused, missing remap, or teleop not
 running), not in the controller.

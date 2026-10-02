@@ -43,8 +43,7 @@ Keyboard control (terminal 2). Keys go to `/teleop_cmd`, not `/cmd_vel`,
 so the controller stays in charge and a bump still halts the robot:
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args \
-  -p stamped:=true -r cmd_vel:=/teleop_cmd
+ros2 run teleop_twist_keyboard teleop_twist_keyboard 
 ```
 
 Click into this terminal before pressing keys. Each key press holds control

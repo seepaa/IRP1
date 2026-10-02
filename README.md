@@ -116,7 +116,12 @@ If `/map` isn't in the **By topic** list, that terminal is missing the
 Save the map (writes `project1_map.pgm` and `project1_map.yaml`):
 
 ```bash
-ros2 run nav2_map_server map_saver_cli -f project1_map
+export ROS_LOCALHOST_ONLY=0
+export ROS_DOMAIN_ID=42
+source /opt/ros/jazzy/setup.bash
+cd ~/IRP1
+ros2 run nav2_map_server map_saver_cli -f project1_map --ros-args -p map_subscribe_transient_local:=true -p save_map_timeout:=10.0
+
 ```
 
 If the launch output shows "Robot odom pose ... is outside the map grid",

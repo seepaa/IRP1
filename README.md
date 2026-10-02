@@ -22,28 +22,25 @@ and `teleop_twist_keyboard`. Check with:
 ros2 pkg list | grep -E 'turtlebot4_gz_bringup|irobot_create_gz|teleop_twist_keyboard'
 ```
 
-Build:
+Build and launch
 
 ```bash
-mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/seepaa/IRP1
-cd ~/ros2_ws && colcon build --packages-select proj1
+source /opt/ros/jazzy/setup.bash
+cd ~/ros2_ws
+colcon build --packages-select proj1
 source install/setup.bash
-```
-
-Launch (terminal 1):
-
-```bash
 ros2 launch proj1 simulation.launch.py
-# optional: x:= y:= yaw:=  (start pose), world:=/path/to/other.sdf
-# (its <world name> is read from the file automatically)
+
 ```
+
 
 Keyboard control (terminal 2). Keys go to `/teleop_cmd`, not `/cmd_vel`,
 so the controller stays in charge and a bump still halts the robot:
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard 
+source /opt/ros/jazzy/setup.bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true -r cmd_vel:=/teleop_cmd
+
 ```
 
 Click into this terminal before pressing keys. Each key press holds control
@@ -54,7 +51,9 @@ If the robot ignores the keyboard, check that key presses are reaching the
 controller (terminal 3):
 
 ```bash
-ros2 topic echo /teleop_cmd
+source /opt/ros/jazzy/setup.bash
+ros2 topic echo /teleop_cmd geometry_msgs/msg/TwistStamped
+
 ```
 
 Press a key in the teleop terminal. A message should appear here and the

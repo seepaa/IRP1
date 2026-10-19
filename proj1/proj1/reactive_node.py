@@ -1,11 +1,12 @@
 """
-Reactive (subsumption-style) controller for a simulated TurtleBot 4.
+Reactive (subsumption-style) controller for a TurtleBot 4 (real or sim).
 
 Behaviors, highest priority first. Each behavior is its own method that
 returns a velocity command when it wants control this cycle, or ``None`` to
 let a lower-priority behavior act (the first non-``None`` command wins):
 
-1. halt        -- stop while any bumper is pressed.
+1. halt        -- stop while any bumper is pressed (and, by default, on a
+                  cliff or wheel drop).
 2. teleop      -- keyboard commands from ``/teleop_cmd``. The keyboard node
                   publishes once per key press, so the last command is held
                   for ``teleop_timeout`` seconds before autonomy resumes.
@@ -106,6 +107,16 @@ class SubsumptionController(Node):
             'random_turn_max_deg', 15.0).value)
         self.heading_tolerance = math.radians(self.declare_parameter(
             'heading_tolerance_deg', 3.0).value)
+        # Readings closer than this are ignored (on top of the driver's own
+        # range_min), so parts of the robot itself never count as obstacles.
+        self.min_valid_range = self.declare_parameter(
+            'min_valid_range', 0.0).value                        # m
+        # The halt reflex stays on only while hazard messages keep arriving;
+        # without this a dropped "released" message would halt us forever.
+        self.hazard_timeout = self.declare_parameter(
+            'hazard_timeout', 0.5).value                         # s
+        self.halt_on_cliff = self.declare_parameter(
+            'halt_on_cliff', True).value
         # teleop_twist_keyboard publishes once per key press, so keep the
         # last key in charge this long before handing back to autonomy.
         self.teleop_timeout = self.declare_parameter(
@@ -117,7 +128,11 @@ class SubsumptionController(Node):
 
         self.create_subscription(
             LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
-        self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        # Sensor-data QoS (best effort) matches either a reliable or a
+        # best-effort /odom publisher; a reliable subscriber would get
+        # nothing from the real Create 3 if it publishes best effort.
+        self.create_subscription(
+            Odometry, '/odom', self.odom_callback, qos_profile_sensor_data)
         self.create_subscription(
             HazardDetectionVector, '/hazard_detection',
             self.hazard_callback, qos_profile_sensor_data)
@@ -129,7 +144,9 @@ class SubsumptionController(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Sensor state.
-        self.bumper_hit = False
+        self.halt_hazard = False
+        self.hazard_time = None
+        self.scan_ready = False
         self.front_left_dist = math.inf
         self.front_right_dist = math.inf
         self.scan_yaw_offset = None
@@ -166,9 +183,12 @@ class SubsumptionController(Node):
     # ------------------------------------------------------------------
 
     def hazard_callback(self, msg):
-        """Record whether any bumper is currently pressed."""
-        self.bumper_hit = any(
-            d.type == HazardDetection.BUMP for d in msg.detections)
+        """Record whether any halting hazard is currently detected."""
+        halt_types = {HazardDetection.BUMP}
+        if self.halt_on_cliff:
+            halt_types |= {HazardDetection.CLIFF, HazardDetection.WHEEL_DROP}
+        self.halt_hazard = any(d.type in halt_types for d in msg.detections)
+        self.hazard_time = self.get_clock().now()
 
     def teleop_callback(self, msg):
         """Store the latest keyboard command and when it arrived."""
@@ -194,10 +214,13 @@ class SubsumptionController(Node):
     def scan_callback(self, msg):
         """Find the closest obstacle in the front-left and front-right arcs."""
         offset = self.lidar_yaw_offset(msg.header.frame_id)
+        if offset is None:
+            return  # Don't know which way the lidar faces yet.
+        min_range = max(msg.range_min, self.min_valid_range)
         left = math.inf
         right = math.inf
         for i, r in enumerate(msg.ranges):
-            if not (msg.range_min < r < msg.range_max):
+            if not (min_range < r < msg.range_max):
                 continue
             # Beam angle in the robot's frame (0 = straight ahead, + = left),
             # so this works however the lidar is mounted or configured.
@@ -209,9 +232,10 @@ class SubsumptionController(Node):
                 right = min(right, r)
         self.front_left_dist = left
         self.front_right_dist = right
+        self.scan_ready = True
 
     def lidar_yaw_offset(self, lidar_frame):
-        """Return the lidar's yaw relative to the base frame (cached)."""
+        """Return the lidar's yaw relative to the base frame, or None."""
         if self.scan_yaw_offset is not None:
             return self.scan_yaw_offset
         if lidar_frame in ('', self.base_frame):
@@ -220,11 +244,13 @@ class SubsumptionController(Node):
         tf = lookup_sensor_transform(
             self.tf_buffer, self.base_frame, lidar_frame)
         if tf is None:
+            # The real TurtleBot 4's lidar is mounted rotated, so guessing
+            # "forward" would swap front and side; wait for TF instead.
             self.get_logger().warn(
                 f'No TF {self.base_frame} <- {lidar_frame} yet; '
-                'assuming the lidar faces forward.',
+                'ignoring scans until it arrives.',
                 throttle_duration_sec=5.0)
-            return 0.0
+            return None
         self.scan_yaw_offset = yaw_from_quaternion(tf.transform.rotation)
         self.get_logger().info(
             f'Lidar yaw offset: {math.degrees(self.scan_yaw_offset):.1f} deg')
@@ -236,8 +262,12 @@ class SubsumptionController(Node):
 
     def control_loop(self):
         """Publish the command of the highest-priority active behavior."""
-        if self.current_yaw is None:
-            return  # No odometry yet.
+        if self.current_yaw is None or not self.scan_ready:
+            # Never drive blind: wait for odometry and a usable scan (the
+            # lidar motor must be running and its TF known).
+            self.get_logger().info(
+                'Waiting for /odom and /scan...', throttle_duration_sec=5.0)
+            return
         for name, behavior in self.behaviors:
             cmd = behavior()
             if cmd is not None:
@@ -252,10 +282,14 @@ class SubsumptionController(Node):
     # ------------------------------------------------------------------
 
     def halt(self):
-        """1. Stop while any bumper is pressed."""
-        if self.bumper_hit:
-            return self.make_cmd(0.0, 0.0)
-        return None
+        """1. Stop while any bumper is pressed (or cliff / wheel drop)."""
+        if not self.halt_hazard:
+            return None
+        age = self.get_clock().now() - self.hazard_time
+        if age > Duration(seconds=self.hazard_timeout):
+            self.halt_hazard = False  # Hazard messages stopped: released.
+            return None
+        return self.make_cmd(0.0, 0.0)
 
     def teleop(self):
         """2. Hold the last keyboard command for ``teleop_timeout`` s."""
@@ -341,9 +375,10 @@ class SubsumptionController(Node):
         """Build a Twist or TwistStamped velocity command."""
         if self.stamped:
             cmd = TwistStamped()
-            # Leave header.stamp at zero: diff_drive_controller then uses its
-            # own clock. A real stamp from our sim clock can lag Gazebo's by
-            # 0.5 s or more on slow machines, and the controller rejects it.
+            # Leave header.stamp at zero so the receiver uses its own clock.
+            # In sim our clock can lag Gazebo's; on the real robot the
+            # desktop's and the Pi's clocks can disagree. Either way a real
+            # stamp can look stale and get the command rejected.
             cmd.header.frame_id = self.base_frame
             twist = cmd.twist
         else:

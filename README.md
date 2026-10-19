@@ -1,17 +1,123 @@
 # Robotics_Project_1
 
-CS 4023/5023 Project 1: a simulated TurtleBot 4 (ROS 2 Jazzy, Gazebo
-Harmonic) running a reactive, subsumption-style controller and building an
+CS 4023/5023 Projects 1 and 2: a TurtleBot 4 (ROS 2 Jazzy) running a
+reactive, subsumption-style controller. Project 2 runs it on a **physical**
+TurtleBot 4 in REPF B4; Project 1 ran it in Gazebo Harmonic, building an
 occupancy-grid map of a room and L-shaped hallway.
 
 Package `proj1`:
 
 | Path | What it is |
 |---|---|
-| `proj1/worlds/cust_robo_room.sdf` | The room and hallway (`<world name="project1_world">`) |
-| `proj1/launch/simulation.launch.py` | Starts Gazebo, spawns the TurtleBot 4, runs both nodes |
+| `proj1/launch/robot.launch.py` | **Project 2.** Starts the lidar, disables bump reflexes, runs the controller on the real robot |
+| `proj1/launch/simulation.launch.py` | Project 1. Starts Gazebo, spawns the TurtleBot 4, runs both nodes |
+| `proj1/worlds/cust_robo_room.sdf` | Project 1 room and hallway (`<world name="project1_world">`) |
 | `proj1/proj1/reactive_node.py` | Controller: halt, teleop, escape, avoid, random turn, forward |
 | `proj1/proj1/occupancy_mapper.py` | Mapper: publishes `/map` (`nav_msgs/OccupancyGrid`) |
+
+First-time setup on the lab desktop:
+
+```bash
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+git clone https://github.com/seepaa/IRP1
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select proj1
+```
+
+# Project 2: physical TurtleBot 4
+
+Everything below runs on the **lab desktop**, except step 1. The robot's own
+drivers already publish `/scan`, `/odom`, `/hazard_detection` and `/tf`, so
+no Gazebo is involved.
+
+## 1. Check the robot (SSH terminal)
+
+Carry the robot by its base (never by the tower or sensors) and put it on the
+floor. Then:
+
+```bash
+ssh student@<robotName>.cs.nor.ou.edu      # password: student
+ros2 topic list                            # expect /scan, /tf, /odom
+```
+
+If those topics are missing, run `turtlebot4-daemon-restart`, wait for the
+startup chime, and check again. As a last resort:
+`ros2 launch turtlebot4_bringup robot.launch.py`.
+
+If the robot is on its dock, undock it (from this terminal or a desktop one):
+
+```bash
+ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
+```
+
+## 2. Desktop terminal setup (every desktop terminal)
+
+In **every** desktop terminal, run `robot-setup.sh`, enter the robot's name,
+and run the commands it prints, in order (they `unset ROS_LOCALHOST_ONLY`,
+set `ROS_DOMAIN_ID`, `ROS_DISCOVERY_SERVER` and `ROS_SUPER_CLIENT`, and
+restart the ROS daemon). Then:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 topic list                            # should show the robot's topics
+```
+
+Do **not** use the Project 1 `ROS_LOCALHOST_ONLY=0` / `ROS_DOMAIN_ID=42`
+exports here: they put the terminal on a different network than the robot.
+
+## 3. Launch (desktop terminal 1)
+
+```bash
+ros2 launch proj1 robot.launch.py
+```
+
+This starts the lidar motor, turns off the Create 3's built-in bump reflexes
+(so our halt behavior is in charge), and starts the controller. The
+controller logs `Waiting for /odom and /scan...` until both arrive, then
+`Behavior: forward` and the robot starts moving.
+
+Optional arguments: `forward_speed:=0.1` (m/s), `turn_speed:=0.5` (rad/s),
+`mapper:=true` (also publish `/map`), `halt_on_cliff:=false`,
+`start_lidar:=false`,
+`disable_reflexes:=false`, `stamped:=false`.
+
+## 4. Keyboard control (desktop terminal 2)
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true -r cmd_vel:=/teleop_cmd
+```
+
+Same as Project 1: keys go to `/teleop_cmd`, each key press holds control for
+5 s, and a bump still halts the robot. Lower the teleop speeds (`z`/`c`
+keys) to around 0.1 m/s and 0.2 rad/s.
+
+## 5. Stopping
+
+Ctrl+C the launch. It stops the lidar motor on the way out (it prints
+`Stopping lidar motor...`). If it warns that this failed, stop it by hand:
+
+```bash
+ros2 service call /stop_motor std_srvs/srv/Empty "{}"
+```
+
+Then carry the robot back to its charging dock. The lidar must be stopped
+before the robot goes on the dock.
+
+## Robot troubleshooting
+
+- **Stuck on `Waiting for /odom and /scan...`:** check `ros2 topic hz /scan`
+  and `ros2 topic hz /odom`. No `/scan` means the lidar isn't spinning; no
+  data at all means the terminal is missing the `robot-setup.sh` exports.
+- **`No TF base_link <- rplidar_link yet`:** the controller ignores scans
+  until it knows how the lidar is mounted. Check `ros2 topic echo /tf_static`.
+- **Robot backs away by itself after a bump:** reflexes are still on. Check
+  `ros2 param get /motion_control reflexes_enabled`.
+- **Robot halts at dark floor tape:** the cliff sensors see it as a drop.
+  Relaunch with `halt_on_cliff:=false`.
+
+# Project 1: simulation
 
 ## Requirements
 
@@ -20,13 +126,6 @@ ROS 2 Jazzy with `turtlebot4_simulator` (for `turtlebot4_gz_bringup`),
 
 ```bash
 ros2 pkg list | grep -E 'turtlebot4_gz_bringup|irobot_create_gz|teleop_twist_keyboard|nav2_map_server'
-```
-
-First-time setup:
-
-```bash
-mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/seepaa/IRP1
 ```
 
 ## Terminal setup (every terminal)

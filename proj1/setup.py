@@ -22,8 +22,8 @@ setup(
     zip_safe=True,
     maintainer='Thomas Kaseca',
     maintainer_email='112017654+ThoamsKaseca@users.noreply.github.com',
-    description=('CS 4023/5023 Project 1: reactive controller and occupancy-grid '
-                 'mapper for a simulated TurtleBot 4'),
+    description=('CS 4023/5023 Projects 1-2: reactive controller and '
+                 'occupancy-grid mapper for a real or simulated TurtleBot 4'),
     license='Apache-2.0',
     extras_require={
         'test': [

@@ -1,5 +1,5 @@
 """
-Occupancy-grid mapper for a simulated TurtleBot 4.
+Occupancy-grid mapper for a TurtleBot 4 (real or simulated).
 
 Builds a 2-D ``nav_msgs/OccupancyGrid`` from lidar scans and odometry and
 publishes it on ``/map``. Mapping only: the robot does not navigate with it.
@@ -75,7 +75,9 @@ class OccupancyMapper(Node):
         self.map_pub = self.create_publisher(OccupancyGrid, '/map', map_qos)
         self.create_subscription(
             LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
-        self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        # Best-effort QoS so a best-effort /odom publisher is also heard.
+        self.create_subscription(
+            Odometry, '/odom', self.odom_callback, qos_profile_sensor_data)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)

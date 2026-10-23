@@ -15,107 +15,216 @@ Package `proj1`:
 | `proj1/proj1/reactive_node.py` | Controller: halt, teleop, escape, avoid, random turn, forward |
 | `proj1/proj1/occupancy_mapper.py` | Mapper: publishes `/map` (`nav_msgs/OccupancyGrid`) |
 
-First-time setup on the lab desktop:
+# Project 2: physical TurtleBot 4
+
+You need four terminals. Terminal 1 is an SSH session on the robot; Terminals
+0, 2 and 3 run on the lab desktop. Replace anything in `<angle brackets>` with
+your own values. The robot's own drivers already publish `/scan`, `/odom`,
+`/hazard_detection` and `/tf`, so no Gazebo is involved.
+
+| Terminal | Runs on | Purpose |
+|---|---|---|
+| 0 | Desktop | Download and build the code (once) |
+| 1 | Robot (SSH) | Check the robot is up, undock it |
+| 2 | Desktop | Launch the project |
+| 3 | Desktop | Keyboard control |
+
+> **Watch for the handout typo.** The OU handout prints
+> `export ROS_DISCOVERY_SERVER:"..."` with a colon. It must be `=`. With the
+> colon, the desktop can't see the robot and nothing below works.
+
+## Terminal 0: build (desktop, once)
+
+If the repo is not on this machine yet:
 
 ```bash
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
-git clone https://github.com/seepaa/IRP1
+git clone -b project-2 https://github.com/seepaa/IRP1
+```
+
+If it is already there from Project 1:
+
+```bash
+cd ~/ros2_ws/src/IRP1
+git fetch && git checkout project-2 && git pull
+```
+
+Then build:
+
+```bash
 cd ~/ros2_ws
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select proj1
 ```
 
-# Project 2: physical TurtleBot 4
+The build should end with `Finished <<< proj1`. You can close this terminal
+afterwards.
 
-Everything below runs on the **lab desktop**, except step 1. The robot's own
-drivers already publish `/scan`, `/odom`, `/hazard_detection` and `/tf`, so
-no Gazebo is involved.
+## Terminal 1: robot (SSH)
 
-## 1. Check the robot (SSH terminal)
-
-Carry the robot by its base (never by the tower or sensors) and put it on the
-floor. Then:
+Put the robot on the floor, lifting it by the base only (never by the tower or
+sensors). Then log in (password: `student`) and check its topics:
 
 ```bash
-ssh student@<robotName>.cs.nor.ou.edu      # password: student
-ros2 topic list                            # expect /scan, /tf, /odom
+ssh student@<robotName>.cs.nor.ou.edu
+ros2 topic list
 ```
 
-If those topics are missing, run `turtlebot4-daemon-restart`, wait for the
-startup chime, and check again. As a last resort:
-`ros2 launch turtlebot4_bringup robot.launch.py`.
+The list must include `/scan`, `/tf` and `/odom`. If any are missing, restart
+the daemon, wait for the startup chime, and check again:
 
-If the robot is on its dock, undock it (from this terminal or a desktop one):
+```bash
+turtlebot4-daemon-restart
+ros2 topic list
+```
+
+If they are still missing, start the robot's bringup by hand:
+
+```bash
+ros2 launch turtlebot4_bringup robot.launch.py
+```
+
+If the robot is on its dock, undock it:
 
 ```bash
 ros2 action send_goal /undock irobot_create_msgs/action/Undock "{}"
 ```
 
-## 2. Desktop terminal setup (every desktop terminal)
+Leave this terminal open; you may need it to stop the LiDAR at the end.
 
-In **every** desktop terminal, run `robot-setup.sh`, enter the robot's name,
-and run the commands it prints, in order (they `unset ROS_LOCALHOST_ONLY`,
-set `ROS_DOMAIN_ID`, `ROS_DISCOVERY_SERVER` and `ROS_SUPER_CLIENT`, and
-restart the ROS daemon). Then:
+## Terminal 2: launch the project (desktop)
+
+Run the setup script and enter the robot's name:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 topic list                            # should show the robot's topics
+robot-setup.sh
 ```
+
+It prints a list of commands. Run them in order, using the numbers it printed
+(note the `=` after `ROS_DISCOVERY_SERVER`):
+
+```bash
+unset ROS_LOCALHOST_ONLY
+export ROS_DOMAIN_ID=<number it printed>
+export ROS_DISCOVERY_SERVER=";;;;;;;;<IP it printed>:11811;"
+export ROS_SUPER_CLIENT=True
+ros2 daemon stop
+ros2 daemon start
+```
+
+Then build, load the workspace, and launch:
+
+```bash
+cd ~/ros2_ws
+ls src/IRP1/proj1/package.xml                # must exist
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select proj1         # must end with "Finished <<< proj1"
+source install/setup.bash                    # loads your workspace into this terminal
+ros2 pkg prefix proj1                        # should print ~/ros2_ws/install/proj1
+ros2 launch proj1 robot.launch.py
+```
+
+You should see, in order:
+
+1. The LiDAR starts spinning.
+2. `Create 3 reflexes disabled`
+3. `Behavior: forward`, and the robot starts driving.
+
+Optional settings go on the end of the launch line. Press Ctrl+C to stop
+first, then relaunch with them, for example:
+
+```bash
+ros2 launch proj1 robot.launch.py forward_speed:=0.08 turn_speed:=0.4
+ros2 launch proj1 robot.launch.py halt_on_cliff:=false
+```
+
+All options: `forward_speed:=0.1` (m/s), `turn_speed:=0.5` (rad/s),
+`mapper:=true` (also publish `/map`), `halt_on_cliff:=false`,
+`start_lidar:=false`, `disable_reflexes:=false`, `stamped:=false`.
 
 Do **not** use the Project 1 `ROS_LOCALHOST_ONLY=0` / `ROS_DOMAIN_ID=42`
 exports here: they put the terminal on a different network than the robot.
 
-## 3. Launch (desktop terminal 1)
+## Terminal 3: keyboard control (desktop)
+
+Open a new terminal. Run the setup script, then the same exports as Terminal 2
+(with the numbers it prints), then load ROS and the project:
 
 ```bash
-ros2 launch proj1 robot.launch.py
+robot-setup.sh
+unset ROS_LOCALHOST_ONLY
+export ROS_DOMAIN_ID=<number it printed>
+export ROS_DISCOVERY_SERVER=";;;;;;;;<IP it printed>:11811;"
+export ROS_SUPER_CLIENT=True
+ros2 daemon stop
+ros2 daemon start
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
 ```
 
-This starts the lidar motor, turns off the Create 3's built-in bump reflexes
-(so our halt behavior is in charge), and starts the controller. The
-controller logs `Waiting for /odom and /scan...` until both arrive, then
-`Behavior: forward` and the robot starts moving.
-
-Optional arguments: `forward_speed:=0.1` (m/s), `turn_speed:=0.5` (rad/s),
-`mapper:=true` (also publish `/map`), `halt_on_cliff:=false`,
-`start_lidar:=false`,
-`disable_reflexes:=false`, `stamped:=false`.
-
-## 4. Keyboard control (desktop terminal 2)
+Start the keyboard controller:
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true -r cmd_vel:=/teleop_cmd
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true
 ```
 
-Same as Project 1: keys go to `/teleop_cmd`, each key press holds control for
-5 s, and a bump still halts the robot. Lower the teleop speeds (`z`/`c`
-keys) to around 0.1 m/s and 0.2 rad/s.
+Click into this terminal before pressing keys: `i` forward, `j`/`l` turn, `k`
+stop. Each key press takes control for 5 s, then the robot drives itself
+again. A bump still halts the robot. Lower the speeds with `z` and `c` to
+about 0.1 m/s and 0.2 rad/s.
 
-## 5. Stopping
+## Stopping after the demo
 
-Ctrl+C the launch. It stops the lidar motor on the way out (it prints
-`Stopping lidar motor...`). If it warns that this failed, stop it by hand:
+1. Press Ctrl+C in Terminal 2. It prints `Stopping lidar motor...`.
+2. If the LiDAR is still spinning, stop it from Terminal 1:
 
 ```bash
-ros2 service call /stop_motor std_srvs/srv/Empty "{}"
+   ros2 service call /stop_motor std_srvs/srv/Empty "{}"
 ```
 
-Then carry the robot back to its charging dock. The lidar must be stopped
-before the robot goes on the dock.
+3. Carry the robot back to its charging dock. The LiDAR must be stopped first.
 
-## Robot troubleshooting
+## If something goes wrong
 
-- **Stuck on `Waiting for /odom and /scan...`:** check `ros2 topic hz /scan`
-  and `ros2 topic hz /odom`. No `/scan` means the lidar isn't spinning; no
-  data at all means the terminal is missing the `robot-setup.sh` exports.
-- **`No TF base_link <- rplidar_link yet`:** the controller ignores scans
-  until it knows how the lidar is mounted. Check `ros2 topic echo /tf_static`.
-- **Robot backs away by itself after a bump:** reflexes are still on. Check
-  `ros2 param get /motion_control reflexes_enabled`.
-- **Robot halts at dark floor tape:** the cliff sensors see it as a drop.
-  Relaunch with `halt_on_cliff:=false`.
+1. **`Package 'proj1' not found`** — that terminal hasn't loaded your
+   workspace. Run:
+
+```bash
+   cd ~/ros2_ws
+   source install/setup.bash
+```
+
+   If it still fails:
+   - *colcon says "Duplicate package names" or builds nothing:* the repo is
+     cloned more than once or in the wrong place. Find every copy with
+     `find ~ -name package.xml -path "*proj1*" 2>/dev/null`, keep exactly one
+     at `~/ros2_ws/src/IRP1/proj1/package.xml`, then run
+     `rm -rf build install log` in `~/ros2_ws` and rebuild.
+   - *Build works but `robot.launch.py` isn't found:* the clone is on the old
+     branch. Run `cd ~/ros2_ws/src/IRP1 && git checkout project-2 && git pull`,
+     then rebuild and re-source.
+2. **Desktop `ros2 topic list` shows only `/rosout` and `/parameter_events`**
+   — that terminal is missing the exports, or has `:` instead of `=`. Redo the
+   `robot-setup.sh` exports and the daemon restart, then `ros2 topic list`.
+3. **Stuck on `Waiting for /odom and /scan...`** — check
+   `ros2 topic hz /scan` on the desktop. No data means the LiDAR isn't
+   spinning; start it from Terminal 1:
+   `ros2 service call /start_motor std_srvs/srv/Empty "{}"`
+4. **`No TF base_link <- rplidar_link yet` keeps repeating** — check the
+   robot's transforms with `ros2 topic echo /tf_static --once`.
+5. **Logs `Behavior: forward` but the robot doesn't move** — Ctrl+C, then
+   `ros2 launch proj1 robot.launch.py stamped:=false`
+6. **Robot backs away by itself after a bump** — reflexes are still on:
+
+```bash
+   ros2 param get /motion_control reflexes_enabled
+   ros2 param set /motion_control reflexes_enabled false
+```
+
+7. **Robot stops at dark floor tape** — Ctrl+C, then
+   `ros2 launch proj1 robot.launch.py halt_on_cliff:=false`
+8. **Too fast or too slow** — Ctrl+C, then
+   `ros2 launch proj1 robot.launch.py forward_speed:=0.08 turn_speed:=0.4`
 
 # Project 1: simulation
 
